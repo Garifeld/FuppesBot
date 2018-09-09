@@ -46,6 +46,8 @@ class Fp:
             return Fp((self.m*x.m)%self.p,self.p)
         if type(x)==int:
             return Fp((self.m*x)%self.p,self.p)
+        if type(x)==Vector:
+            return x*self 
         raise ValueError("Uncastable argument in Fp-multiplication %s"%type(x))
 
     def __rmul__(self,x):
@@ -207,6 +209,11 @@ class Vector():
         for key in self.v:
             self.v[key]=lamb*self.v[key]
 
+    def __mul__(self,lamb):
+        ret =Vector({})
+        for key in self.v:
+            ret.v[key]=lamb*self.v[key]
+        return ret
 
 
     def __repr__(self):
@@ -214,8 +221,21 @@ class Vector():
 
     def __str__(self):
         return str(self.v)
+
+    def __eq__(self,w):
+        if type(w)==int and w==0:
+            return len(self.v)==0
+        return self.v==w.v
+    
         
 class ChainComplex():
+
+    #self.TB is a dict of dicts. such that
+    #self.TB[dim][i] is a tuple (j,vect) such that d(vect) is the j-1 th basis vector TB in dimension dim-1
+    #j=0 means it represents a cohomology class, j=-k means it is boundary of the (k-1)-th vector in TB[dim+1]
+
+    #self.gen has two methods dim(n), which returns the dimension of C_n
+    # and d(dim,i) which returns the image of the i-th standart basis vector as a vector
     
     # ring could also be lambda x:Fp(x,p) or sth.
     def __init__(self, gen, ring=lambda x:x):
@@ -229,14 +249,94 @@ class ChainComplex():
     # 4) For a boundary, find a preimage under the differential
     def computeHomology(self,mindim ,maxdim):
          #raise NotImplementedError("This method has not yet been implemented")
-        self.bases ={dim:{()}}
-        for dim in range(maxdim, mindim-1,-1):
-            pass
+        self.TB ={}
+        self.cohomGen={}
+        for dim in range(maxdim+1, mindim-2,-1):
+            self.TB[dim]={}
+            self.cohomGen[dim]=set([])
+        for dim in range(maxdim+1, mindim-2,-1):
+            for i in range(self.gen.dim(dim)):
+                if(i in self.TB[dim]):#meaning that there has been a dim+1 dim vector whose bdry has pivot at i
+                    print("TB[%i] already contains %i"%(dim,i))
+                    continue
+                st=Vector({i:self.ring(1)})#standart-basis vector
+                bdry = self.gen.d(dim,i)#boundary of that vector
+                print("%i-th std basis vector in dim %i send to %s"%(i,dim,str(bdry)))
+                print("current TB in dim %i: %s"%(dim,str(self.TB[dim])))
+                print("current TB in dim %i: %s"%(dim-1,str(self.TB[dim-1])))
+                print("looking at simplex %s of dim %i and its bdry %s"%(str(st),dim,str(bdry)) )
+                pivot=-1
+                if bdry !=0:
+                    pivot=max(bdry.v)
+                    print("pivot:%i"%pivot)
+                    while bdry !=0 and pivot in self.TB[dim-1]:
+                        toadd =self.TB[dim][-(self.TB[dim-1][pivot][0]+1)][1]
+                        print("toadd: %s"%str(toadd))
+                        lamb=(-bdry.v[pivot]
+                              /self.TB[dim-1][pivot][1].v[pivot])
+                        st =st+lamb*toadd#asdf
+                        bdry = bdry+lamb*self.TB[dim-1][pivot][1]
+                        if bdry !=0:
+                            pivot=max(bdry.v)
+                if bdry ==0:# we found a cycle which isnt bdry
+                    self.TB[dim][i]=[0,st]
+                    self.cohomGen[dim].add(i)
+                else:
+                    self.TB[dim-1][pivot]=[-(i+1),bdry]#asdf -0=0 so my encoding doesnt work !!!!
+                    self.TB[dim][i]=[pivot+1,st]
 
+    def TBcoefficients(self,dim,v):
+        coeff = {}
+        if self.TB==None:
+            raise ArithmeticError("Cohomology has not been computed in dimension %i"%dim)
+        for i in range(len(self.TB[dim])-1,-1,-1):#counting backwards
+            if i not in v.v:
+                continue
+            coi =-v.v[i]/self.TB[dim][i][1].v[i]
+            coeff[i]=coi
+            v=v+coi*self.TB[dim][i][1]
+        return Vector(coeff)
 
+    def TBcoefftoVector(self,dim,coeff):
+        cur=Vector({})
+        for i in v.v:
+            cur=cur+coeff.v[i]*self.TB[dim][i][1]
+        return cur
+    
+    #returns a representative of a given cohomology class
+    # the class is given as a linear combination of the triangular bases TB's
+    def getRepresentative(self,dim,v):
+        cur=Vector({})
+        for i in v.v:
+            cur=cur+v.v[i]*self.TB[dim][i][1]
+        return cur
 
-    def print_Homology(self,mindim,maxdim):
-        print("k:dim(H_k(C_k)) for k=%i,..,%i: %s"%(mindim,maxdim,','.join(["%i: %i"%(j,len(self.cohomGen[j])) for j in range(mindim,maxdim+1)])))
+    
+    #finds for a vector v which is a boundary a preimage under the differential
+    def preimage(self,dim,v):
+        coeff = self.TBcoefficients(self,dim,v)
+        v=Vector({})
+        for i in coeff.v:
+            ind = self.TB[dim][i][0]
+            if ind>=0:
+                raise ArithmeticError("Given class is not a boundary, coefficents: %s"%str(coeff))
+            v=v+coeff.v[i]*self.TB[dim+1][-(ind+1)][1]
+        return v
+    
+    # finds sends a cycle to the homology class it represents
+    def homClass(self,dim,v):
+        coeff =self.TBcoefficients(dim,v)
+        v=Vector({})
+        for i in coeff.v:
+            ind = self.TB[dim][i][0]
+            if ind>0:
+                raise ArithmeticError("Given class is not a cycle, coefficents: %s"%str(coeff))
+            if ind==0:
+                v.v[i]=coeff.v[i]
+        return v
+
+    def printHomology(self,mindim,maxdim):
+        print("k:dim(H_k(C_k)) for k=%i,..,%i: %s"%(mindim,maxdim,' , '.join(["%i:%i"%(j,len(self.cohomGen[j])) for j in range(mindim,maxdim+1)])))
 
 class SurjOperadAlgebra(ChainComplex):
     def applySurjection():
@@ -247,6 +347,10 @@ class SurjOperadAlgebra(ChainComplex):
 class FilteredComplex(ChainComplex):
     #for  our purpose, we can look only at vector spaces. The filtration
     # is given by additionally giving each basis vector a filtration degree.
+
+    # gen should now contain a method filtrdegree with arguments (self,dim,i) which tells you the filtrationd degree of the i-th basis vector in dimension dim. 
+    def __init__(self, gen, ring=lambda x:x):
+        super(B, self).__init__(gen,ring)
     
     def startSpectralSequence():
         raise NotImplementedError("This method has not yet been implemented")
@@ -316,6 +420,38 @@ def getTorus():
     X=SimplicialSet(inc)
     return X
     
+class SampleGen:
+    #self.gen has two methods dim(n), which returns the dimension of C_n
+    # and d(dim,i) which returns the image of the i-th standart basis vector as a vector
+    
+    def __init__(self):
+        self.dims={0:1,1:2,2:1}
+        pass
+
+    def dim(self,n):
+        if n not in self.dims:
+            return 0
+        else:
+            return self.dims[n]
+
+    
+    def d(self,dim,i):
+        if dim==2:
+            return Vector({})
+        if dim==1:
+            return Vector({0:Fp(1,2)})
+        return Vector({})
+
+
+SG=SampleGen()
+CC=ChainComplex(gen=SG,ring =lambda x:Fp(x,2))
+CC.computeHomology(0,2)
+CC.printHomology(0,2)
+#v=CC.TB[1][1][1]
+v=Vector({})
+print(v)
+ch = CC.homClass(1,v)
+print(ch)
 
 #X=getTorus()
 #A=((),1,2)
@@ -325,9 +461,9 @@ def getTorus():
 #ret=X.applyMorphismFromSimplexCategory(A,f)
 #print(ret)
 
-one=Fp(1,5)
-v=Vector({0:one,2:one})
-w=Vector({0:Fp(4,5),1:one})
-print(v)
-print(w)
-print(v+w)
+#one=Fp(1,5)
+#v=Vector({0:one,2:one})
+#w=Vector({0:Fp(4,5),1:one})
+#print(v)
+#print(w)
+#print(v+w)
