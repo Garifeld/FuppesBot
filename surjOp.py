@@ -188,6 +188,7 @@ class Vector():
         self.shorten()
 
     def __add__(self,w):
+        #print("adding vectors %s and %s"%(str(self),str(w)))
         nud = self.v.copy()
         for key in w.v:
             if key in nud:
@@ -205,6 +206,8 @@ class Vector():
     def __rmul__(self,lamb):
         for key in self.v:
             self.v[key]=lamb*self.v[key]
+
+
 
     def __repr__(self):
         return str(self.v)
